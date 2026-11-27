@@ -567,32 +567,27 @@ class GeHomeUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.info(f"Removing stale appliance API {mac}")
                 self._appliance_apis.pop(mac)
 
-        # Update current macs for HA registry cleanup
-        current_macs = valid_macs
-
-        # Loop through all devices for this config entry
-        for device_entry in list(device_registry.devices.values()):
-            # Skip devices not associated with this config entry
-            if self._config_entry.entry_id not in device_entry.config_entries:
+        for device_entry in dr.async_entries_for_config_entry(
+            device_registry, self._config_entry.entry_id
+        ):
+            device_mac = next(
+                (identifier for domain, identifier in device_entry.identifiers if domain == DOMAIN),
+                None,
+            )
+            if not device_mac or device_mac in valid_macs:
                 continue
 
-            # Extract mac_addresses (assumes identifiers contain ("ge_home", mac))
-            device_mac = None
-            for ident in device_entry.identifiers:
-                if ident[0] == DOMAIN:  # DOMAIN = "ge_home"
-                    device_mac = ident[1]
-                    break
+            _LOGGER.info(
+                "Removing stale device %s (%s) from HA registry",
+                device_entry.name,
+                device_mac,
+            )
+            for entity_entry in er.async_entries_for_device(
+                entity_registry, device_entry.id, include_disabled_entities=True
+            ):
+                entity_registry.async_remove(entity_entry.entity_id)
 
-            if device_mac and device_mac not in current_macs:
-                _LOGGER.info(f"Removing stale device {device_entry.name} ({device_mac}) from HA registry")
-
-                # Remove all entities linked to this device
-                for entity_entry in list(entity_registry.entities.values()):
-                    if entity_entry.device_id == device_entry.id:
-                        entity_registry.async_remove(entity_entry.entity_id)
-
-                # Remove the device itself
-                device_registry.async_remove_device(device_entry.id)            
+            device_registry.async_remove_device(device_entry.id)
 
     #endregion
 
